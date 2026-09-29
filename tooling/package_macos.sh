@@ -52,6 +52,29 @@ if [ ! -f "$INSTALL_DOC" ]; then
   exit 1
 fi
 
+# Native assets have to be bundled or the app cannot reach Firebase anywhere
+# except the build machine. Flutter silently drops them on the universal
+# (x86_64 + arm64) macOS release path: NativeAssetsManifest.json comes out as
+# `{}` and objective_c.framework is never embedded, so every Firestore call
+# dies with "Couldn't resolve native function 'DOBJC_initializeApi'". The app
+# still builds and launches, which is what makes it dangerous. Builds must be
+# arm64-only (`flutter config --enable-macos-arm64-only`).
+NATIVE_ASSETS_MANIFEST="$APP_PATH/Contents/Frameworks/App.framework/Versions/A/Resources/flutter_assets/NativeAssetsManifest.json"
+if ! grep -q 'objective_c' "$NATIVE_ASSETS_MANIFEST" 2>/dev/null; then
+  echo "error: native assets are missing from this build." >&2
+  echo "       $NATIVE_ASSETS_MANIFEST" >&2
+  echo "       contents: $(cat "$NATIVE_ASSETS_MANIFEST" 2>/dev/null)" >&2
+  echo "       Firebase needs objective_c; without it the app fails on every" >&2
+  echo "       machine except this one. Fix:" >&2
+  echo "         flutter config --enable-macos-arm64-only && flutter clean" >&2
+  exit 1
+fi
+
+if [ ! -d "$APP_PATH/Contents/Frameworks/objective_c.framework" ]; then
+  echo "error: objective_c.framework is not embedded in $APP_PATH" >&2
+  exit 1
+fi
+
 # ── Code-sign the app ───────────────────────────────────────────────────
 # Developer ID → hardened runtime + timestamp, ready for notarization.
 # No Developer ID → re-sign ad-hoc.
